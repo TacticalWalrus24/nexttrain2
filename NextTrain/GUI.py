@@ -8,6 +8,20 @@ import pymysql
 connection = pymysql.connect(host="localhost", user="root", passwd="", database="nexttrain2")
 cursor = connection.cursor()
 
+def clean_database():
+    command = "DELETE FROM `platforms` WHERE 1"
+    cursor.commit(command)
+    command = "DELETE FROM `rail` WHERE 1"
+    cursor.commit(command)
+    command = "DELETE FROM `rail_connections` WHERE 1"
+    cursor.commit(command)
+    command = "DELETE FROM `route` WHERE 1"
+    cursor.commit(command)
+    command = "DELETE FROM `route_station` WHERE 1"
+    cursor.commit(command)
+    command = "DELETE FROM `stations` WHERE 1"
+    cursor.commit(command)
+
 def dat_update_station(station):
     retrive = f"SELECT ID FROM stations"
     cursor.execute(retrive)
@@ -15,7 +29,7 @@ def dat_update_station(station):
     match = False
     for sid in stationID:
         if station.ID == sid:
-            write = f"UPDATE `stations` SET `Name`='{station.name}',`Network`='{station.network}',`isStation`='{station.widget_class.is_station}' WHERE `ID` = '{station.ID}'"
+            write = f"UPDATE `stations` SET `Name`='{station.get_name()}',`Network`='{station.network}',`isStation`='{station.widget_class.is_station}' WHERE `ID` = '{station.ID}'"
             cursor.execute(write)
             match = True
             break
@@ -39,6 +53,7 @@ def dat_update_rail(rail):
         cursor.execute(write)
 
 def dat_update_railcon(rail):
+
     for c in rail.connections:
         write = f"INSERT INTO `rail_connections` (`railID`, `stationID`) VALUES ('{rail.ID}', '{c.station.ID}')"
         cursor.execute(write)
@@ -57,7 +72,7 @@ def dat_update_route(route):
         cursor.execute(write)
 
 def dat_update_route_station(route):
-    retrive = f"SELECT ID FROM route_station"
+    retrive = f"SELECT 'ID' FROM `route_station`"
     cursor.execute(retrive)
     routeID = [x[0] for x in cursor.fetchall()]
     match = False
@@ -70,7 +85,70 @@ def dat_update_route_station(route):
             write = f"INSERT INTO `route_station` (`LineID`, `StationID`, `stopNumber`) VALUES ('{route.ID}', '{s.station.ID}', '{route.stations.index(s)}')"
             cursor.execute(write)
 
+def dat_load_station(network):
+    retrive = f"SELECT * FROM stations WHERE Network = '{network}'"
+    cursor.execute(retrive)
+    rows = [x[0] for x in cursor.fetchall()]
+    for r in rows:
+        if r[4]:
+            create_station(0)
+            for s in stations:
+                if r[0] == s.station.ID:
+                    retrive = f"SELECT * FROM platforms WHERE stationID = '{r[0]}'"
+                    cursor.execute(retrive)
+                    platform = [x[0] for x in cursor.fetchall()]
+                    s.station.set_data(r[1], platform)
+
+def dat_load_rails(network):
+    retrive = f"SELECT * FROM `rail` WHERE 'Network' = '{network}'"
+    cursor.execute(retrive)
+    rows = [x[0] for x in cursor.fetchall()]
+    for r in rows:
+        retrive = f"SELECT 'StationID' FROM `rail_connections` WHERE 'railID' = '{r[0]}'"
+        cursor.execute(retrive)
+        connections = [x[0] for x in cursor.fetchall()]
+        global clicknumber
+        clicknumber=0
+        for c in connections:
+            for s in stations:
+                if c[0] == s.ID:
+                    connect_rails(s.widget_class, s.widget_class)
+
+def dat_load_route(network):
+    retrive = f"SELECT * FROM `rail` WHERE 'Network' = '{network}'"
+    cursor.execute(retrive)
+    rows = [x[0] for x in cursor.fetchall()]
+
+
 networkName = "Testville"
+
+def connect_rails(widget_class, event):
+    global clicknumber
+    global class1
+    global widget1
+    if clicknumber==0:
+        widget1 = event.widget
+        class1 = widget_class
+        clicknumber+=1
+    else:
+        widget2 = event.widget
+        station2 = widget_class.station
+        x1 = widget1.winfo_x() + widget1.winfo_width()/2
+        y1 = widget1.winfo_y() + widget1.winfo_height()/2
+        x2 = widget2.winfo_x() + widget2.winfo_width()/2
+        y2 = widget2.winfo_y() + widget2.winfo_height()/2
+        connector = cvs_map.create_line(x1,y1,x2,y2,fill='black',width=10)
+        con = [class1, widget_class]
+        rail = Rail(networkName,con,connector)
+        dat_update_rail(rail)
+        dat_update_railcon(rail)
+        rails.append(rail)
+        widget_class.rail.append(rail)
+        class1.rail.append(rail)
+        widget_class.connected = True
+        class1.connected = True
+        widget1 = event.widget
+        class1 = widget_class
 
 # #region widgets
 class Widgets:
@@ -89,31 +167,7 @@ class Widgets:
             widget._drag_start_y = event.y
             clicknumber = 0
         elif not route_join:
-            global class1
-            global widget1
-            if clicknumber==0:
-                widget1 = event.widget
-                class1 = self
-                clicknumber+=1
-            else:
-                widget2 = event.widget
-                station2 = self.station
-                x1 = widget1.winfo_x() + widget1.winfo_width()/2
-                y1 = widget1.winfo_y() + widget1.winfo_height()/2
-                x2 = widget2.winfo_x() + widget2.winfo_width()/2
-                y2 = widget2.winfo_y() + widget2.winfo_height()/2
-                connector = cvs_map.create_line(x1,y1,x2,y2,fill='black',width=10)
-                con = [class1, self]
-                rail = Rail(networkName,con,connector)
-                dat_update_rail(rail)
-                dat_update_railcon(rail)
-                rails.append(rail)
-                self.rail.append(rail)
-                class1.rail.append(rail)
-                self.connected = True
-                class1.connected = True
-                widget1 = event.widget
-                class1 = self
+            connect_rails(self, event)
         elif route_join:
             global route_stations
             if not event.widget in route_stations:
@@ -395,7 +449,6 @@ btn_file = Button(fr_options, text="File", bg="whitesmoke")
 btn_edit = Button(fr_options, text="Edit", bg="whitesmoke")
 fr_schedule = Frame(window, bg="whitesmoke")
 btn_route = Button(fr_schedule, text="Create Route", bg="whitesmoke")
-btn_graph = Button(fr_schedule, text="Create Graph", bg="whitesmoke")
 
 cvs_map = Canvas(window, width=100, height=100, bg="white")
 fr_buttons = Frame(window, bg="grey")
@@ -410,7 +463,6 @@ btn_edit.grid(row=0, column=1, sticky="w", padx=5, pady=5)
 
 btn_schedule = Button(fr_options2, text="Schedule", bg="whitesmoke", command=lambda:show_schedules(fr_schedule, fr_buttons))
 btn_route.grid(row=1, column = 0, sticky="s")
-btn_graph.grid(row=1, column = 1, sticky="s")
 cvs_map.grid(row=1, column=0, sticky="nsew")
 fr_buttons.grid(row=1, column=1, sticky="ns")
 btn_schedule.grid(row=0, column=0, sticky="new", padx=5, pady=5)
@@ -624,7 +676,6 @@ btn_station.bind("<Button-1>", create_station)
 btn_junction.bind("<Button-1>", create_junction)
 btn_rail.bind("<Button-1>", join_nodes)
 btn_route.bind("<Button-1>", route_nodes)
-btn_graph.bind("<Button-1>", create_graph)
 class Schedules:
     def __init__(self, network, route, stops, path):
         self.network = network
